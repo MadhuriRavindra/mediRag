@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 import jwt
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -9,12 +9,27 @@ from app import config
 from app.database import Base, engine, get_db
 from app.models import User, AuditLog, now
 from app.security import hash_password, verify_password, create_token, decode_token
+from app.models import User, AuditLog, Report, Measurement, now
 
 Base.metadata.create_all(engine)
 app = FastAPI(title="MediRAG")
 oauth2 = OAuth2PasswordBearer(tokenUrl="/login")
 
 
+class MeasurementIn(BaseModel):
+    test_name: str = Field(min_length=1, max_length=60)
+    value: float
+    unit: str = Field(default="", max_length=20)
+    ref_low: float | None = None
+    ref_high: float | None = None
+
+
+class ReportIn(BaseModel):
+    report_date: date
+    source: str = Field(min_length=1, max_length=100)
+    notes: str = Field(default="", max_length=5000)
+    measurements: list[MeasurementIn] = Field(min_length=1, max_length=50)
+    
 class RegisterIn(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=10, max_length=128)
@@ -90,3 +105,82 @@ def get_current_user(token: str = Depends(oauth2), db: Session = Depends(get_db)
 @app.get("/me")
 def me(user: User = Depends(get_current_user)):
     return {"id": user.id, "username": user.username, "role": user.role}
+
+class MeasurementIn(BaseModel):
+    test_name: str = Field(min_length=1, max_length=60)
+    value: float
+    unit: str = Field(default="", max_length=20)
+    ref_low: float | None = None
+    ref_high: float | None = None
+
+
+class ReportIn(BaseModel):
+    report_date: date
+    source: str = Field(min_length=1, max_length=100)
+    notes: str = Field(default="", max_length=5000)
+    measurements: list[MeasurementIn] = Field(min_length=1, max_length=50)
+
+
+def require_patient(user: User = Depends(get_current_user)) -> User:
+    if user.role != "patient":
+        raise HTTPException(403, "Only patients can manage their own reports")
+    return user
+
+
+@app.post("/reports", status_code=201)
+def create_report(
+    data: ReportIn,
+    user: User = Depends(require_patient),
+    db: Session = Depends(get_db),
+):
+    report = Report(
+        patient_id=user.id,  # from the token, never from the request body
+        report_date=data.report_date,
+        source=data.source,
+        notes=data.notes,
+    )
+    db.add(report)
+    db.flush()
+    for m in data.measurements:
+        db.add(Measurement(
+            patient_id=user.id,
+            report_id=report.id,
+            measured_on=data.report_date,
+            test_name=m.test_name.strip().lower(),
+            value=m.value,
+            unit=m.unit,
+            ref_low=m.ref_low,
+            ref_high=m.ref_high,
+        ))
+    db.commit()
+    audit(db, user.id, "report_created", f"report_id={report.id}")
+    return {"id": report.id}
+
+
+@app.get("/reports")
+def list_reports(user: User = Depends(require_patient), db: Session = Depends(get_db)):
+    reports = (
+        db.query(Report)
+        .filter(Report.patient_id == user.id)
+        .order_by(Report.report_date)
+        .all()
+    )
+    result = []
+    for r in reports:
+        rows = (
+            db.query(Measurement)
+            .filter(Measurement.report_id == r.id, Measurement.patient_id == user.id)
+            .all()
+        )
+        result.append({
+            "id": r.id,
+            "report_date": r.report_date.isoformat(),
+            "source": r.source,
+            "notes": r.notes,
+            "measurements": [
+                {"test": m.test_name, "value": m.value, "unit": m.unit,
+                 "ref_low": m.ref_low, "ref_high": m.ref_high}
+                for m in rows
+            ],
+        })
+    return result

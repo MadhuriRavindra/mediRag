@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from sqlalchemy import String, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
+from datetime import date, datetime, timezone
+from sqlalchemy import String, DateTime, ForeignKey, Date, Float, Text
 
 
 def now() -> datetime:
@@ -37,3 +39,25 @@ class AuditLog(Base):
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     action: Mapped[str] = mapped_column(String(50))
     detail: Mapped[str] = mapped_column(String(255), default="")
+
+class Report(Base):
+    __tablename__ = "reports"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    report_date: Mapped[date] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(100))
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class Measurement(Base):
+    __tablename__ = "measurements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    report_id: Mapped[int] = mapped_column(ForeignKey("reports.id"), index=True)
+    measured_on: Mapped[date] = mapped_column(Date)
+    test_name: Mapped[str] = mapped_column(String(60), index=True)
+    value: Mapped[float] = mapped_column(Float)
+    unit: Mapped[str] = mapped_column(String(20))
+    ref_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ref_high: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -1,5 +1,6 @@
 import requests
 import streamlit as st
+import pandas as pd
 
 API = "http://127.0.0.1:8000"
 
@@ -19,6 +20,118 @@ def show_error(resp):
         except ValueError:
             st.error("Something went wrong.")
 
+def show_patient_area(headers):
+    tab_view, tab_add = st.tabs(["My reports", "Add a report"])
+
+    with tab_view:
+        resp = requests.get(f"{API}/reports", headers=headers, timeout=10)
+        if resp.status_code != 200:
+            show_error(resp)
+        else:
+            reports = resp.json()
+            if not reports:
+                st.info("No reports yet. Add one in the next tab.")
+            for r in reports:
+                with st.expander(f"{r['report_date']} - {r['source']}"):
+                    if r["notes"]:
+                        st.write(r["notes"])
+                    st.dataframe(pd.DataFrame(r["measurements"]), hide_index=True)
+
+    with tab_add:
+        with st.form("report_form"):
+            report_date = st.date_input("Report date")
+            source = st.text_input("Hospital or lab")
+            notes = st.text_area("Doctor's notes or findings (optional)")
+            st.caption("Enter your values. Use the + at the bottom of the table to add rows.")
+            table = st.data_editor(
+                pd.DataFrame([{"test_name": "", "value": None, "unit": ""}]),
+                num_rows="dynamic",
+            )
+            saved = st.form_submit_button("Save report")
+        if saved:
+            measurements = []
+            for _, row in table.iterrows():
+                if str(row["test_name"]).strip() and not pd.isna(row["value"]):
+                    measurements.append({
+                        "test_name": str(row["test_name"]),
+                        "value": float(row["value"]),
+                        "unit": str(row["unit"] or ""),
+                    })
+            if not measurements:
+                st.error("Please enter at least one test with a value.")
+            else:
+                resp = requests.post(
+                    f"{API}/reports",
+                    json={
+                        "report_date": report_date.isoformat(),
+                        "source": source,
+                        "notes": notes,
+                        "measurements": measurements,
+                    },
+                    headers=headers,
+                    timeout=10,
+                )
+                if resp.status_code == 201:
+                    st.success("Report saved. Open the 'My reports' tab to see it.")
+                else:
+                    show_error(resp)
+
+def show_patient_area(headers):
+    tab_view, tab_add = st.tabs(["My reports", "Add a report"])
+
+    with tab_view:
+        resp = requests.get(f"{API}/reports", headers=headers, timeout=10)
+        if resp.status_code != 200:
+            show_error(resp)
+        else:
+            reports = resp.json()
+            if not reports:
+                st.info("No reports yet. Add one in the next tab.")
+            for r in reports:
+                with st.expander(f"{r['report_date']} - {r['source']}"):
+                    if r["notes"]:
+                        st.write(r["notes"])
+                    st.dataframe(pd.DataFrame(r["measurements"]), hide_index=True)
+
+    with tab_add:
+        with st.form("report_form"):
+            report_date = st.date_input("Report date")
+            source = st.text_input("Hospital or lab")
+            notes = st.text_area("Doctor's notes or findings (optional)")
+            st.caption("Enter your values. Use the + at the bottom of the table to add rows.")
+            table = st.data_editor(
+                pd.DataFrame([{"test_name": "", "value": None, "unit": ""}]),
+                num_rows="dynamic",
+            )
+            saved = st.form_submit_button("Save report")
+        if saved:
+            measurements = []
+            for _, row in table.iterrows():
+                if str(row["test_name"]).strip() and not pd.isna(row["value"]):
+                    measurements.append({
+                        "test_name": str(row["test_name"]),
+                        "value": float(row["value"]),
+                        "unit": str(row["unit"] or ""),
+                    })
+            if not measurements:
+                st.error("Please enter at least one test with a value.")
+            else:
+                resp = requests.post(
+                    f"{API}/reports",
+                    json={
+                        "report_date": report_date.isoformat(),
+                        "source": source,
+                        "notes": notes,
+                        "measurements": measurements,
+                    },
+                    headers=headers,
+                    timeout=10,
+                )
+                if resp.status_code == 201:
+                    st.success("Report saved. Open the 'My reports' tab to see it.")
+                else:
+                    show_error(resp)
+
 # ---------- Logged-in view ----------
 if st.session_state.token:
     headers = {"Authorization": f"Bearer {st.session_state.token}"}
@@ -29,10 +142,10 @@ if st.session_state.token:
         if st.button("Log out"):
             st.session_state.token = None
             st.rerun()
-    else:
-        # token expired or invalid
-        st.session_state.token = None
-        st.rerun()
+        if user["role"] == "patient":
+            show_patient_area(headers)
+        else:
+            st.info("Doctor access to patient records comes in Phase 5.")
 
 # ---------- Logged-out view ----------
 else:
@@ -72,3 +185,5 @@ else:
                 st.success(f"Username '{new_user}' was created successfully. Now go to the Log in tab.")
             else:
                 show_error(resp)
+
+               
